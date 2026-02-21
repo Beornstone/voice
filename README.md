@@ -13,6 +13,12 @@ from src.voice_agent.api import router as voice_agent_router
 app.include_router(voice_agent_router, prefix="")
 ```
 
+Install deps, set env vars, and run:
+
+```bash
+pip install -r requirements.txt
+export GEMINI_API_KEY=...
+export GEMINI_MODEL=gemini-2.0-flash  # optional, defaults to this and auto-falls back to gemini-1.5-flash
 Set env vars and run:
 
 ```bash
@@ -22,4 +28,5 @@ export ELEVEN_VOICE_ID=...
 uvicorn src.main:app --reload
 ```
 
+If you changed env vars, restart uvicorn.
 Then open `http://localhost:8000/api/agent/demo` and click **Start Mic**.

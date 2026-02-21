@@ -6,7 +6,27 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 import pytest
 
 from src.voice_agent import router as agent_router
+from src.voice_agent.api import agent_turn
+from src.voice_agent.schema import TurnRequest
 from src.voice_agent.session_store import session_store
+
+
+@pytest.mark.asyncio
+async def test_turn_smoke_check_balance_from_mocked_gemini(monkeypatch):
+    async def fake_parse_intent(self, transcript, payees_allowed):
+        return agent_router.INTENT_ADAPTER.validate_python(
+            {
+                "intent": "CHECK_BALANCE",
+                "assistant_say": "Checking now",
+            }
+        )
+
+    monkeypatch.setattr(agent_router.GeminiIntentClient, "parse_intent", fake_parse_intent)
+
+    response = await agent_turn(TurnRequest(session_id="s-smoke", transcript="what is my balance"))
+    assert response.intent.intent == "CHECK_BALANCE"
+    assert response.ui_action and response.ui_action.type == "OPEN_BALANCE"
+    assert "1234.56 EUR" in response.assistant_say
 
 
 @pytest.mark.asyncio
