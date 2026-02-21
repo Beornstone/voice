@@ -1,6 +1,9 @@
 import json
 
 from google import genai
+from typing import Any
+
+import httpx
 from pydantic import TypeAdapter, ValidationError
 
 from .config import Settings
@@ -15,6 +18,9 @@ class GeminiIntentClient:
 
     async def parse_intent(self, transcript: str, payees_allowed: list[str]) -> Intent:
         if not self.settings.gemini_api_key or self._client is None:
+
+    async def parse_intent(self, transcript: str, payees_allowed: list[str]) -> Intent:
+        if not self.settings.gemini_api_key:
             return self._intent_adapter.validate_python(
                 {
                     "intent": "CLARIFY",
@@ -26,6 +32,8 @@ class GeminiIntentClient:
         prompt = self._prompt(transcript, payees_allowed)
         raw = self._call_gemini(prompt)
         return self._validate_with_repair(raw, transcript, payees_allowed)
+        raw = await self._call_gemini(prompt)
+        return await self._validate_with_repair(raw, transcript, payees_allowed)
 
     def _prompt(self, transcript: str, payees_allowed: list[str]) -> str:
         return (
@@ -67,6 +75,52 @@ class GeminiIntentClient:
         return json.loads(text[start : end + 1])
 
     def _validate_with_repair(self, raw: dict, transcript: str, payees_allowed: list[str]) -> Intent:
+            f"User transcript: {transcript}"
+        )
+
+    async def _call_gemini(self, prompt: str) -> dict[str, Any]:
+        url = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{self.settings.gemini_model}:generateContent?key={self.settings.gemini_api_key}"
+        )
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "responseMimeType": "application/json",
+                "responseSchema": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "intent": {
+                            "type": "STRING",
+                            "enum": [
+                                "CHECK_BALANCE",
+                                "TRANSFER_DRAFT",
+                                "CONFIRM",
+                                "CANCEL",
+                                "CLARIFY",
+                                "HELP",
+                            ],
+                        },
+                        "payee_label": {"type": "STRING"},
+                        "amount": {"type": "NUMBER"},
+                        "currency": {"type": "STRING"},
+                        "assistant_say": {"type": "STRING"},
+                        "choices": {"type": "ARRAY", "items": {"type": "STRING"}},
+                    },
+                    "required": ["intent", "assistant_say"],
+                },
+            },
+        }
+
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.post(url, json=payload)
+            response.raise_for_status()
+            data = response.json()
+
+        text = data["candidates"][0]["content"]["parts"][0]["text"]
+        return json.loads(text)
+
+    async def _validate_with_repair(self, raw: dict[str, Any], transcript: str, payees_allowed: list[str]) -> Intent:
         try:
             return self._intent_adapter.validate_python(raw)
         except ValidationError:
@@ -76,6 +130,7 @@ class GeminiIntentClient:
             )
             try:
                 repaired = self._call_gemini(repair_prompt)
+                repaired = await self._call_gemini(repair_prompt)
                 return self._intent_adapter.validate_python(repaired)
             except Exception:
                 return self._intent_adapter.validate_python(
